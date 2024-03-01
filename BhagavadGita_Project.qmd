@@ -1,0 +1,291 @@
+---
+title: "Unstructured Data Analysis on BhagavadGita"
+author: "Sri Vidya Battula"
+date: "2024-02-29"
+format:
+  html:
+    toc: true
+    toc-location: left
+    theme: Simplex
+    highlight-style: dark
+    self-contained: true
+    
+---
+
+# Introduction:
+
+This report explores **The Bhagavad Gita**, a 700-verse Hindu scripture from the Indian epic Mahabharata, through the lens of digital humanities, employing sentiment analysis, topic modeling, and object detection. These computational techniques enable a novel examination of the text's emotional depth, thematic diversity, and imagery, transcending traditional interpretive methods. By analyzing the dialogue between Prince Arjuna and Lord Krishna, I aim to uncover new insights into the philosophical and ethical discussions presented in the Gita. The study contextualizes my approach within the digital analysis of ancient texts and details our methodology, including algorithm selection and data processing, followed by a presentation of our findings. The discussion interprets these results, emphasizing their contribution to understanding the Gita's complex narrative and symbolism, considering both the insights gained and the limitations of our approach. This research not only advances the field of digital humanities but also offers fresh perspectives on the Gita’s enduring relevance.
+
+# Rationale:
+
+My curiosity was piqued by the potential of machines to analyze the complexities of an ancient Hindu text. Language has evolved, with slangs and the contextual use of words undergoing significant changes over time. The fascination with deciphering ancient scriptures and their accompanying imagery has been a longstanding one, and now I aim to merge this interest with my contemporary expertise in business analytics. This project is an endeavor to bridge my deep-seated knowledge of ancient wisdom with the cutting-edge capabilities of modern computational analysis.
+
+
+# Methodology:
+
+
+This research employs a comprehensive methodology combining web scraping, data cleaning, sentiment analysis, topic modeling, and object detection to analyze the text of **The BhagavadGita**. The process is outlined as follows:
+
+## **Data Collection**
+
+ 
+
+- The data for this study was collected from <a href='https://bhagavadgita.io/'>Bhagavadgita.io</a> , a comprehensive resource for the text of **The BhagavadGita**. Using web scraping techniques, I extracted the 700 verses of the scripture, ensuring that the complete content, including verse numbers and chapter affiliations, was accurately captured for analysis.
+
+### Scraping data : 
+
+
+```{r}
+library(rvest)
+
+results <- list(vector("list", 18))
+
+base_url <- "https://bhagavadgita.io/chapter/"
+for (i in 1:18) {
+  chapter_url <- paste0(base_url, i)
+  verses_table <- read_html(chapter_url) %>%
+    html_elements(".flex-1") %>% 
+    html_text() %>% 
+    data.frame(chapter = i,verses = .)
+  
+  results[[i]] <- verses_table 
+}
+
+table <-  do.call(rbind, results)
+```
+
+## **Data Preprocessing**
+
+- Following data collection, I undertook a series of data cleaning steps to prepare the dataset for analysis. This involved removing any extraneous information, such as unwanted gaps and irrelevant words that came along during scraping, as well as website-specific formatting that could interfere with textual analysis. Additionally, I standardized the text formatting to ensure consistency across the dataset.
+
+### Data Cleaning :
+
+```{r}
+table_cleaned <- table[table$verses != "",]
+table_cleaned <- table_cleaned[table_cleaned$verses != "Search", ]
+
+#save the file to reuse the data without scraping again
+write.csv(table_cleaned, "bhagavadgita verses.csv")
+```
+
+
+```{r}
+#read the saved data
+table <- read.csv("./bhagavadgita verses.csv")
+table <- table[, -1]
+```
+
+
+## **Sentiment Analysis**
+
+- Sentiment analysis was conducted using lexicon-based algorithms in R. This approach allowed me to evaluate the emotional valence of each verse, categorizing them into positive, negative, or neutral sentiments based on the lexical content. The process involved mapping each word in the verses to a predefined sentiment lexicon, aggregating the scores to assign a sentiment value to each verse.
+
+### Sentiment Analysis on verses of Bhagavadgita :
+
+```{r warning=FALSE, message=FALSE}
+library(sentimentr)
+library(lexicon)
+library(magrittr)
+library(dplyr)
+
+statement <- table
+
+sentiment_score <- sentiment(tolower(statement$verses), 
+                        polarity_dt = lexicon::hash_sentiment_jockers_rinker)
+sentiment_score
+
+
+
+mean_sentiment <- sentiment_score %>%
+  group_by(element_id) %>%
+  summarise(mean_sentiment = mean(sentiment, na.rm = TRUE)) 
+
+score <- sum(mean_sentiment$mean_sentiment)/length(mean_sentiment$mean_sentiment)
+
+```
+
+
+## **Topic Modeling**
+
+- For topic modeling, I utilized the Latent Dirichlet Allocation (LDA) algorithm, also implemented in R, to identify underlying themes within the text. To determine the optimal number of topics (k), I employed the `searchK` method, which tests a range of topic numbers and evaluates their fit using measures of semantic coherence and held-out likelihood. Based on the analysis of semantic coherence plots and held-out likelihood, I selected **k=5** as the optimal number of topics, providing a balance between thematic specificity and coherence.
+
+
+### Topic Modeling :
+
+```{r warning=FALSE, message=FALSE}
+
+library(dplyr)
+library(quanteda)
+library(stringr)
+library(stm)
+library(tidyverse)
+library(tm)
+
+
+table$verses <- table$verses %>%
+  textclean::replace_contraction() %>%
+  str_replace_all(., "\n", " ") %>%
+  str_squish() %>%
+  gsub("([a-z])([A-Z])", "\\1 \\2", .) %>%
+  gsub("\\s?[\\;:'.,-]\\s?", " ", .) %>%
+  gsub("\"", "", .) %>%  
+  tolower() %>%
+  textstem::lemmatize_strings(.) %>%
+  removeWords(stopwords("SMART"))
+
+
+table$verses <- textstem::lemmatize_strings(table$verses)
+
+
+predictorText <- textProcessor(documents = table$verses, 
+                               metadata = table,
+                               stem = FALSE)
+
+statementPrep <- prepDocuments(documents = predictorText$documents, 
+                               vocab = predictorText$vocab,
+                               meta = predictorText$meta)
+
+kTest <- searchK(documents = statementPrep$documents, 
+                 vocab = statementPrep$vocab, 
+                 K = c(3, 4, 5, 10, 20), verbose = FALSE)
+
+
+plot(kTest)
+
+
+topicPredictor <- stm(documents = statementPrep$documents,
+                      vocab = statementPrep$vocab,
+                      data = statementPrep$meta, K = 5, verbose = FALSE)
+
+```
+
+## **Object Detection**
+
+Finally, object detection was executed using a Python-based model with a pre-trained YOLOv3 algorithm, specifically the `Models/yolov3.pt` configuration. This advanced deep learning model is known for its efficiency and accuracy in real-time object detection, which makes it suitable for identifying and classifying a wide range of visual elements within images. The step was meticulously designed to detect and categorize visual references depicted in the imagery. For this project, the YOLOv3 model was tasked with analyzing the last picture in the book, which is rich in symbolic content. This analysis was intended to complement the sentiment and topic analysis by providing a visual dimension to the text's interpretation.   
+
+Here's the link to Object Detection Model, check this out, <a href='https://colab.research.google.com/drive/1HTRkNKmWjkKaWo9EzYZIQIdZx4qWhLEf?usp=sharing'>Object Detection Model</a>.
+
+ 
+
+This methodology integrates techniques from both R and Python programming languages, leveraging the strengths of each for different aspects of the analysis. By combining sentiment analysis, topic modeling, and object detection, this study offers a multi-dimensional exploration of **The BhagavadGita**, providing insights into its emotional landscape, thematic structure, and visual imagery.
+
+
+# Findings & Interpretation of Results:
+
+## **Sentiment Analysis**
+
+```{r}
+
+print(paste("Total Sentiment Score of The BhagavadGita is", round(score, 3)))
+
+```
+
+### **Interpretation of Sentiment Analysis:**
+
+- A positive sentiment score of **0.143** could indicate themes of hope, righteousness, duty fulfilled, enlightenment, or other aspects that are generally considered positive or uplifting to lead life in a right way.
+
+
+## **Topic Modeling**
+
+```{r}
+
+plot(topicPredictor)
+
+labelTopics(topicPredictor)
+
+```
+
+### **Interpretation of Topics:**
+
+**Topic 1: Spiritual Practices and Knowledge**
+
+ - **Core Themes**: This topic focuses on spiritual knowledge, yoga (as a practice and path to enlightenment), sacrifice, and worship. It emphasizes the pursuit of supreme knowledge (Brahman) and the importance of spiritual practices in attaining enlightenment.
+ 
+ - **Interpretation**: These words suggest a strong emphasis on the spiritual path and the various practices that lead to the realization of the ultimate truth or supreme reality. The importance of knowledge, yoga, and sacrifice indicates a discourse on the means to achieve spiritual growth and understanding.
+
+
+**Topic 2: Divine Manifestation and Devotion**
+
+ - **Core Themes**: Worldly and divine realms, the greatness of God (Lord), and forms of divine manifestation are central here. It also touches on blessings and the concept of devotion.
+ 
+ - **Interpretation**: This topic likely covers discussions on the nature of the divine, God's manifestations in the world, and the role of devotion (Bhakti) in realizing God. The emphasis on forms and blessings points towards discussions on God's omnipresence and the devotee's relationship with the divine.
+ 
+ 
+**Topic 3: Ethics and Action**
+
+ - **Core Themes**: Actions, the nature of the mind, ethical living, and self-control are highlighted, alongside concepts of duty (Dharma) and renunciation.
+
+ - **Interpretation**: This topic delves into the ethical and moral dimensions of human actions, suggesting the importance of performing one's duty without attachment to the fruits of actions. It emphasizes self-control and purity as essential for ethical living and spiritual advancement.
+
+
+**Topic 4: Duty, Desire, and Destiny**
+
+ - **Core Themes**: Focuses on the characters (Arjuna, Krishna), desires, the end goals of life, pleasures, and the concept of the eternal.
+ 
+ - **Interpretation**: This topic seems to explore the personal and philosophical dilemmas faced by Arjuna, guided by Krishna. It touches on the conflict between desires and duties, the pursuit of eternal truths, and the significance of overcoming personal desires for higher spiritual goals.
+ 
+ 
+**Topic 5: Detachment and Liberation**
+
+ - **Core Themes**: Senses, the body, detachment, freedom from attachments, and the performance of duties without attachment are discussed.
+ 
+ - **Interpretation**: Here, the emphasis is on detachment (Vairagya) and liberation (Moksha). It suggests the importance of being free from attachments and desires as a means to achieve liberation. Performing duties without attachment to the outcomes is highlighted as a path to spiritual freedom.
+
+
+## **Object Detection**
+
+
+![This is the image used in the Object Detection Model. Let's see what my model detects](F:/Downloads/Cosmic%20Form.jpg "The Cosmic Form of Lord Krishna")
+```{r}
+# This is the output saved from the object detection model
+
+Objects <- read.csv("F:/Downloads/Cosmic Form Detected Objects.csv")
+
+Objects
+```
+
+### Object Detection Model Analysis
+
+
+- The image depicts a scene from the Bhagavad Gita, showing various characters, possibly including Lord Krishna in his cosmic form, surrounded by multiple faces and figures. It's a complex, multi-faceted image with spiritual and religious symbolism.
+
+
+- In an attempt to extend the capabilities of object detection to the domain of religious artwork, I applied a pre-trained YOLOv3 algorithm to an image from The Bhagavad Gita. The image in question is rich with symbolic and spiritual significance, depicting a multitude of characters and elements that are central to the scripture.
+
+- **Unexpected Model Predictions**: The model's predictions were as follows:
+
+  - **brain_coral**: 82.61%
+  - **coral_reef**: 4.35%
+  - **sea_slug**: 3.12%
+  - **jellyfish**: 2.52%
+  - **honeycomb**: 2.06%
+  - **hen-of-the-woods**: 1.37%
+  - **sea_urchin**: 1.28%
+  - **loggerhead**: 0.58%
+  - **starfish**: 0.32%
+  - **velvet**: 0.25%
+
+#### **Analysis of Results:**
+
+The analysis yielded results that were markedly incongruent with the anticipated outcomes. Rather than identifying the figures and iconography present in the artwork, the model attributed high confidence to labels associated with marine life.
+
+
+**The likely explanations for this discrepancy are manifold:**
+
+  - **Training Dataset Composition:** The YOLOv3 model used in this study was trained on a diverse set of   natural images, with a significant emphasis on marine life, which does not correspond to the thematic  content of the tested image.
+  
+  - **Complexity of Artistic Representation:** The intricate and abstract nature of the artwork presents a challenge for the model, which may have misidentified the ornate patterns and textures in the image as resembling those of coral formations.
+
+  - **Algorithmic Constraints:** Despite YOLOv3's proficiency in real-time object detection, it has its - limitations when confronted with images that diverge from its training scope, particularly those with  abstract or symbolic content.
+
+
+# Conclusion:
+
+In conclusion, this research journey through the sacred verses of the BhagavadGita has been an enlightening fusion of ancient wisdom with contemporary computational techniques. By meticulously applying sentiment analysis and topic modeling, I've illuminated the text's underlying positivity and its profound thematic tapestry, offering deeper insights into its timeless teachings. The attempt at object detection, albeit less successful, opens new avenues for innovation, inviting us to tailor advanced models to the nuanced realm of spiritual art. The Gita is an embodiment of life's eternal quest, and this study has been a step towards capturing its essence in the digital age. As we continue to weave technology with tradition, we edge closer to preserving and understanding the rich tapestry of human heritage, ensuring that the Gita's divine dialogue resonates with and inspires future generations.
+
+Future work could focus on enhancing object detection models with datasets that include or are exclusive to artistic and religious iconography, thereby improving their applicability to the analysis of historical and symbolic images.
+
+# Limitations:
+
+
+Studying a book like the Bhagavad Gita with machine learning algorithms presents considerable challenges. Current techniques may not fully grasp the depth of the teachings, as the verses are contextually rich and situation-based. While algorithms can offer some insights, they cannot completely capture the nuanced meanings, and profundity of the text. Nonetheless, we stand at the dawn of the data analysis era.During my childhood, it was inconceivable for a computer to read a book in hours, but now this can be done in seconds and milliseconds. Image generation and recognition, which were non-existent 8 years ago, have seen significant advancements, as demonstrated by what even a simple pre-trained model can achieve. Good or not, these developments leave me eagerly anticipating the future capabilities of machine learning.
